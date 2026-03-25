@@ -86,8 +86,14 @@ def detect_columns(csv_path):
     return headers, categorical, numeric
 
 
-def split_features_labels(csv_path, target_col):
-    """Split CSV into features and labels, return as base64."""
+def split_features_labels(csv_path, target_col, drop_cols=None):
+    """Split CSV into features and labels, return as base64.
+
+    Automatically drops columns that are likely IDs or free text
+    (unique values > 90% of rows) unless they're the target.
+    """
+    import io
+
     with open(csv_path, "r") as f:
         reader = csv.DictReader(f)
         rows = list(reader)
@@ -102,29 +108,43 @@ def split_features_labels(csv_path, target_col):
         print(f"   Available columns: {', '.join(headers)}")
         sys.exit(1)
 
-    # Feature columns = everything except target
-    feature_cols = [h for h in headers if h != target_col]
+    # Auto-detect columns to drop (IDs, free text, high-cardinality)
+    auto_drop = set(drop_cols or [])
+    for col in headers:
+        if col == target_col:
+            continue
+        unique_vals = len(set(r[col] for r in rows if r[col].strip()))
+        # Drop if >50% unique (likely ID/ticket column) or column name suggests ID
+        if unique_vals > len(rows) * 0.5 or col.lower().endswith("id"):
+            auto_drop.add(col)
+        # Drop if any value has a comma and isn't numeric (free text like names)
+        has_commas = any("," in r[col] for r in rows[:50])
+        if has_commas:
+            auto_drop.add(col)
+        # Drop if >50% empty
+        empty_count = sum(1 for r in rows if not r[col].strip())
+        if empty_count > len(rows) * 0.5:
+            auto_drop.add(col)
 
-    # Build features CSV
-    lines_x = [",".join(feature_cols)]
+    if auto_drop:
+        print(f"  🗑️  Auto-dropping: {sorted(auto_drop)} (IDs/free-text)")
+
+    feature_cols = [h for h in headers if h != target_col and h not in auto_drop]
+
+    # Use csv module for proper quoting
+    buf_x = io.StringIO()
+    writer_x = csv.DictWriter(buf_x, fieldnames=feature_cols)
+    writer_x.writeheader()
     for r in rows:
-        vals = []
-        for c in feature_cols:
-            v = r[c]
-            if "," in v:
-                v = f'"{v}"'
-            vals.append(v)
-        lines_x.append(",".join(vals))
-    x_csv = "\n".join(lines_x)
+        writer_x.writerow({c: r[c] for c in feature_cols})
+    x_b64 = base64.b64encode(buf_x.getvalue().encode()).decode()
 
-    # Build labels CSV
-    lines_y = [target_col]
+    buf_y = io.StringIO()
+    writer_y = csv.DictWriter(buf_y, fieldnames=[target_col])
+    writer_y.writeheader()
     for r in rows:
-        lines_y.append(r[target_col])
-    y_csv = "\n".join(lines_y)
-
-    x_b64 = base64.b64encode(x_csv.encode()).decode()
-    y_b64 = base64.b64encode(y_csv.encode()).decode()
+        writer_y.writerow({target_col: r[target_col]})
+    y_b64 = base64.b64encode(buf_y.getvalue().encode()).decode()
 
     return x_b64, y_b64, feature_cols
 
@@ -218,7 +238,7 @@ def cmd_train(args):
     if r.get("success"):
         print(f"   ✅ Features uploaded")
         print(f"   ⏳ Waiting for processing...", end="", flush=True)
-        time.sleep(8)
+        time.sleep(30)
         print(" done!")
     else:
         print(f"   ❌ Upload failed: {r}")
@@ -238,7 +258,7 @@ def cmd_train(args):
     if r.get("success"):
         print(f"   ✅ Labels attached")
         print(f"   ⏳ Waiting for processing...", end="", flush=True)
-        time.sleep(8)
+        time.sleep(30)
         print(" done!")
     else:
         print(f"   ❌ Label attachment failed: {r}")
