@@ -216,10 +216,10 @@ def cmd_train(args):
         "categorical_features": categorical
     })
     if r.get("success"):
-        job_id = r.get("job_id", "")
-        print(f"   ✅ Upload started")
-        if job_id:
-            wait_job(job_id, "feature upload")
+        print(f"   ✅ Features uploaded")
+        print(f"   ⏳ Waiting for processing...", end="", flush=True)
+        time.sleep(8)
+        print(" done!")
     else:
         print(f"   ❌ Upload failed: {r}")
         sys.exit(1)
@@ -236,10 +236,10 @@ def cmd_train(args):
         "attribute_name": target
     })
     if r.get("success"):
-        job_id = r.get("job_id", "")
         print(f"   ✅ Labels attached")
-        if job_id:
-            wait_job(job_id, "label attachment")
+        print(f"   ⏳ Waiting for processing...", end="", flush=True)
+        time.sleep(8)
+        print(" done!")
     else:
         print(f"   ❌ Label attachment failed: {r}")
         sys.exit(1)
@@ -260,7 +260,7 @@ def cmd_train(args):
         job_id = r.get("job_id", "")
         print(f"   ✅ Training started")
         if job_id:
-            result = wait_job(job_id, "training")
+            result = wait_job(job_id, "training", timeout=600)
             metrics = result.get("validation_metric", {})
     else:
         print(f"   ❌ Training failed: {r}")
